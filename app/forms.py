@@ -1,4 +1,5 @@
 from flask_wtf import FlaskForm
+from flask_wtf.file import FileField, FileAllowed
 from wtforms import DateField, StringField, PasswordField, SubmitField, FloatField, TextAreaField, SelectField, DateTimeField
 from wtforms.validators import DataRequired, Email, EqualTo, Length, ValidationError
 from .models import User
@@ -35,7 +36,10 @@ class TransactionForm(FlaskForm):
     transaction_date = DateField('Date', format='%Y-%m-%d', validators=[DataRequired()])
     transaction_type = SelectField('Type', choices=[('income', 'Income'), ('expense', 'Expense')], validators=[DataRequired()])
     description = TextAreaField('Description', validators=[Length(max=200)])
+    # 👇 New field for CSV upload
+    file = FileField('Upload CSV', validators=[FileAllowed(['csv'], 'CSV files only!')])
     submit = SubmitField('Add Transaction')
+
 
 class EditAccountForm(FlaskForm):
     account_name = StringField('Account Name', validators=[DataRequired(), Length(min=2, max=100)])

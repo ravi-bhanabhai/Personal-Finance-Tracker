@@ -3,11 +3,15 @@ from app.models import Category, Subcategory
 
 def preload_categories():
     default_categories = {
-        "Food": ["Breakfast", "Lunch", "Dinner", "Snacks", "Other"],
-        "Transportation": ["Bus", "Train", "Fuel", "other"],
-        "Entertainment": ["Movies", "Games", "Subscriptions", "Other"],
+        "Food and Drink": ["Restaurants", "Bars", "Groceries", "Other"],
+        "Transportation": ["Bus", "Train", "Car", "Other", "Hotels"],
+        "Entertainment": ["Events", "Subscriptions", "Other"],
         "Shopping": ["Clothes", "Electronics", "Other"],
-        "Bills": ["Electricity", "Water", "Internet", "HouseRent", "other"]
+        "Bills": ["Utilities", "Internet", "HouseRent", "Other"],
+        "Health": ["Fitness", "Doctor", "Other"],
+        "Finances": ["Fees", "Investments", "Other"],
+        "Other": ["Other"],
+        "Income": ["Salary", "Business", "Other"]
     }
 
     for category_name, subcategories in default_categories.items():

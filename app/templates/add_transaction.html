@@ -15,7 +15,7 @@
 {% endwith %}
 
 <!-- Add Transaction Form -->
-<form method="POST">
+<form method="POST" enctype="multipart/form-data">
     {{ form.hidden_tag() }}
 
     <div class="mb-3">
@@ -51,6 +51,11 @@
     <div class="mb-3">
         {{ form.description.label }}
         {{ form.description(class="form-control") }}
+    </div>
+
+    <div class="mb-3">
+        {{ form.file.label }}
+        {{ form.file(class="form-control") }}
     </div>
 
     <button type="submit" class="btn btn-primary">Add Transaction</button>
