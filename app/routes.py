@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, render_template, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from flask import request
 from sqlalchemy import func
+from sqlalchemy import select
 from .forms import LoginForm, RegisterForm, AccountForm, TransactionForm, EditAccountForm
 from .models import User, Account, Transaction, Category, Subcategory
 from . import db, bcrypt, login_manager
@@ -9,8 +10,6 @@ import pandas as pd
 from io import TextIOWrapper
 from collections import defaultdict
 from datetime import datetime, timedelta
-
-
 
 main = Blueprint("main", __name__)
 
@@ -252,22 +251,26 @@ def dashboard():
     user_accounts = Account.query.filter_by(user_id=current_user.user_id).all()
     account_ids = [acc.account_id for acc in user_accounts]
 
-    query = db.session.query(Transaction).filter(Transaction.account_id.in_(account_ids))
-    # Convert to DataFrame
-    df = pd.read_sql(query.statement, db.session.bind)
+    stmt = (
+        select(
+            Transaction.transaction_date,
+            Transaction.amount,
+            Transaction.transaction_type,
+            Transaction.description,
+            Category.name.label("category_name"),
+            Subcategory.name.label("subcategory_name"),
+        )
+        .join(Category, Transaction.category_id == Category.category_id)
+        .join(Subcategory, Transaction.subcategory_id == Subcategory.subcategory_id)
+        .filter(Transaction.account_id.in_(account_ids))
+    )
+    sql = stmt.compile(compile_kwargs={"literal_binds": True})
+    df = pd.read_sql(str(sql), db.engine) #['transaction_date', 'amount', 'transaction_type', 'category_name','subcategory_name']
 
-
-    total_income = db.session.query(db.func.sum(Transaction.amount)).filter(
-        Transaction.transaction_type == 'income',
-        Transaction.account_id.in_(account_ids)
-    ).scalar() or 0
+    total_income = df[df['transaction_type'] == 'income']['amount'].sum()
     total_income = round(total_income, 2)
 
-
-    total_expenses = db.session.query(db.func.sum(Transaction.amount)).filter(
-        Transaction.transaction_type == 'expense',
-        Transaction.account_id.in_(account_ids)
-    ).scalar() or 0
+    total_expenses = df[df['transaction_type'] == 'expense']['amount'].sum()
     total_expenses = round(total_expenses, 2)
 
     total_balance = db.session.query(db.func.sum(Account.balance)).filter(
@@ -276,6 +279,10 @@ def dashboard():
     total_balance = round(total_balance, 2)
 
     remaining_balance = round(total_balance + total_income - total_expenses, 2)
+
+    #Filter out SubCategory = 'Investments'
+    df = df[df['subcategory_name'] != 'Investments']
+
 
     # Recent transactions
     recent_transactions = db.session.query(
@@ -295,43 +302,48 @@ def dashboard():
      .limit(5).all()
 
     # Spending by category
-    spending_by_category = defaultdict(float)
-    transactions = db.session.query(Transaction.amount, Category.name).join(
-        Category, Transaction.category_id == Category.category_id
-    ).filter(
-        Transaction.transaction_type == 'expense',
-        Transaction.account_id.in_(account_ids)
-    ).all()
+    # Filter only expenses
+    expenses_df = df[df["transaction_type"] == "expense"]
+    expenses_df["joined_category"] = expenses_df["category_name"].fillna("") + ' - ' + \
+                            expenses_df["subcategory_name"].fillna("").radd(" - ").str.strip(" -")
 
-    for amount, category_name in transactions:
-        spending_by_category[category_name] += amount
-    spending_by_category = list(spending_by_category.items())
+
+    # Group by category and sum amounts
+    spending_by_category = (
+        expenses_df.groupby("joined_category")["amount"]
+        .sum()
+        .reset_index()
+        .values.tolist()
+    )
 
     income_vs_expense = {
         'income': round(total_income, 2),
         'expense': round(total_expenses, 2)
     }
 
-    # Time Series Chart (last 30 days)
-    today = datetime.today().date()
-    dates = [today - timedelta(days=i) for i in range(29, -1, -1)]
-    time_series_labels = [d.strftime('%Y-%m-%d') for d in dates]
-    time_series_income = []
-    time_series_expense = []
+    #Income vs Expense over time ()
 
-    for d in dates:
-        income = db.session.query(func.sum(Transaction.amount)).filter(
-            Transaction.transaction_type == 'income',
-            Transaction.account_id.in_(account_ids),
-            func.date(Transaction.transaction_date) == d
-        ).scalar() or 0
-        expense = db.session.query(func.sum(Transaction.amount)).filter(
-            Transaction.transaction_type == 'expense',
-            Transaction.account_id.in_(account_ids),
-            func.date(Transaction.transaction_date) == d
-        ).scalar() or 0
-        time_series_income.append(round(income, 2))
-        time_series_expense.append(round(expense, 2))
+    # Full Date range
+    last_year_df = df
+
+    # Convert to month period
+    last_year_df["month"] = pd.to_datetime(last_year_df["transaction_date"]).dt.to_period("M")
+
+    # Group by month and transaction type
+    monthly_grouped = (
+        last_year_df.groupby(["month", "transaction_type"])["amount"]
+        .sum()
+        .unstack(fill_value=0)  # columns become ['expense', 'income'] if present
+        .sort_index()
+    )
+
+    # Extract series as lists (rounded)
+    time_series_labels = [str(m) for m in monthly_grouped.index]
+    time_series_income = monthly_grouped.get("income", pd.Series(0, index=monthly_grouped.index)).round(2).tolist()
+    time_series_expense = monthly_grouped.get("expense", pd.Series(0, index=monthly_grouped.index)).round(2).tolist()
+
+
+    today = datetime.today().date()
 
     # Stacked Area Chart (monthly expenses by category)
     stacked_area_labels = []
@@ -356,44 +368,18 @@ def dashboard():
         for category, total in monthly_transactions:
             stacked_area_data[category][5 - i] = round(total, 2)
 
-    stacked_area_datasets = [
-        {
-            'label': category,
-            'data': values,
-            'backgroundColor': '#'+format(hash(category) % 0xFFFFFF, '06x'),
-            'fill': True
-        }
-        for category, values in stacked_area_data.items()
-    ]
 
-
-    # Waterfall Chart (simplified cash flow)
-    waterfall_labels = ['Income', 'Rent', 'Groceries', 'Transport', 'Savings']
-    waterfall_values = [
-        round(total_income, 2),
-        -800,  # Replace with actual category totals if needed
-        -300,
-        -150,
-        -500
-    ]
-
-    # Heatmap Matrix (daily spending intensity)
-    heatmap_matrix = []
-    for d in dates:
-        expense = db.session.query(func.sum(Transaction.amount)).filter(
-            Transaction.transaction_type == 'expense',
-            Transaction.account_id.in_(account_ids),
-            func.date(Transaction.transaction_date) == d
-        ).scalar() or 0
-        heatmap_matrix.append({
-            'x': d.strftime('%Y-%m-%d'),
-            'y': 'Spending',
-            'v': round(expense, 2)
-        })
-
-    # Donut Chart (category drilldown)
-    donut_labels = [cat for cat, _ in spending_by_category]
-    donut_values = [round(val, 2) for _, val in spending_by_category]
+    # Top 10 Descriptions by total amount spent
+    top_descriptions = (
+        df[df["transaction_type"] == "expense"]
+        .assign(description=df["description"].str.lower())
+        .groupby("description")["amount"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(20)
+    )
+    top_description_labels = top_descriptions.index.tolist()
+    top_description_values = top_descriptions.round(2).tolist()
 
 
     return render_template(
@@ -407,11 +393,6 @@ def dashboard():
         time_series_labels=time_series_labels,
         time_series_income=time_series_income,
         time_series_expense=time_series_expense,
-        stacked_area_labels=stacked_area_labels,
-        stacked_area_datasets=stacked_area_datasets,
-        waterfall_labels=waterfall_labels,
-        waterfall_values=waterfall_values,
-        heatmap_matrix=heatmap_matrix,
-        donut_labels=donut_labels,
-        donut_values=donut_values
+        top_description_labels=top_description_labels,
+        top_description_values=top_description_values,
     )

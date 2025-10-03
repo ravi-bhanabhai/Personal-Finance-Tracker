@@ -47,27 +47,11 @@
             <h5>Income & Expenses Over Time</h5>
             <canvas id="timeSeriesChart"></canvas>
         </div>
-        <div class="col-md-6">
-            <h5>Cumulative Expenses by Category</h5>
-            <canvas id="stackedAreaChart"></canvas>
-        </div>
     </div>
-
     <div class="row my-4">
-        <div class="col-md-6">
-            <h5>Cash Flow Breakdown</h5>
-            <canvas id="waterfallChart"></canvas>
-        </div>
-        <div class="col-md-6">
-            <h5>Spending Heatmap</h5>
-            <canvas id="heatmapChart"></canvas>
-        </div>
-    </div>
-
-    <div class="row my-4">
-        <div class="col-md-6">
-            <h5>Spending Drilldown</h5>
-            <canvas id="donutChart"></canvas>
+        <div class="col-md-12">
+            <h5>Top Items by Description</h5>
+            <canvas id="topDescriptionChart"></canvas>
         </div>
     </div>
 
@@ -106,6 +90,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@1.2.0/dist/chartjs-chart-matrix.min.js"></script>
+
 <script>
     // Pass data from Flask to JavaScript
     const categoryData = {
@@ -132,7 +118,7 @@
     new Chart(document.getElementById('incomeExpenseChart'), { type: 'pie', data: incomeExpenseData });
 </script>
 
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@1.2.0/dist/chartjs-chart-matrix.min.js"></script>
+
 <script>
     // Time Series Line Chart
     const timeSeriesData = {
@@ -141,105 +127,103 @@
             {
                 label: 'Income',
                 data: {{ time_series_income | tojson }},
-                borderColor: '#28a745',
+                borderColor: '#28a745',   // green line
+                backgroundColor: '#28a745',
+                tension: 0.3,             // smooth curve
                 fill: false
             },
             {
                 label: 'Expenses',
                 data: {{ time_series_expense | tojson }},
-                borderColor: '#dc3545',
+                borderColor: '#dc3545',   // red line
+                backgroundColor: '#dc3545',
+                tension: 0.3,
                 fill: false
             }
         ]
     };
+
     new Chart(document.getElementById('timeSeriesChart'), {
         type: 'line',
         data: timeSeriesData,
-        options: { responsive: true }
-    });
-
-    // Stacked Area Chart
-    const stackedAreaData = {
-        labels: {{ stacked_area_labels | tojson }},
-        datasets: {{ stacked_area_datasets | tojson }}
-    };
-    new Chart(document.getElementById('stackedAreaChart'), {
-        type: 'line',
-        data: stackedAreaData,
         options: {
             responsive: true,
-            scales: { y: { stacked: true }, x: { stacked: true } }
-        }
-    });
-
-    // Waterfall Chart (simulated with bar chart)
-    const waterfallData = {
-        labels: {{ waterfall_labels | tojson }},
-        datasets: [{
-            label: 'Cash Flow',
-            data: {{ waterfall_values | tojson }},
-            backgroundColor: function(ctx) {
-                const value = ctx.dataset.data[ctx.dataIndex];
-                return value >= 0 ? '#28a745' : '#dc3545';
-            }
-        }]
-    };
-    new Chart(document.getElementById('waterfallChart'), {
-        type: 'bar',
-        data: waterfallData,
-        options: {
-            responsive: true,
-            scales: { y: { beginAtZero: true } }
-        }
-    });
-
-    // Heatmap Calendar
-    const heatmapData = {
-        datasets: [{
-            label: 'Spending Intensity',
-            data: {{ heatmap_matrix | tojson }},
-            backgroundColor(ctx) {
-                const value = ctx.dataset.data[ctx.dataIndex].v;
-                const alpha = value / 100;
-                return `rgba(220, 53, 69, ${alpha})`;
+            interaction: {
+                mode: 'index',
+                intersect: false
             },
-            borderWidth: 1
-        }]
-    };
-    new Chart(document.getElementById('heatmapChart'), {
-        type: 'matrix',
-        data: heatmapData,
-        options: {
+            plugins: {
+                tooltip: {
+                    mode: 'index',
+                    intersect: false
+                },
+                legend: {
+                    position: 'top'
+                }
+            },
             scales: {
-                x: { type: 'time', time: { unit: 'day' }, offset: true },
-                y: { type: 'category', labels: ['Spending'] }
-            },
-            plugins: { tooltip: { callbacks: { label: ctx => `£${ctx.raw.v}` } } }
-        }
-    });
-
-    // Donut Chart with Drilldown
-    const donutData = {
-        labels: {{ donut_labels | tojson }},
-        datasets: [{
-            label: 'Spending',
-            data: {{ donut_values | tojson }},
-            backgroundColor: ['#007bff', '#ffc107', '#17a2b8', '#6f42c1', '#fd7e14']
-        }]
-    };
-    const donutChart = new Chart(document.getElementById('donutChart'), {
-        type: 'doughnut',
-        data: donutData,
-        options: {
-            onClick: function(evt, elements) {
-                if (elements.length > 0) {
-                    const index = elements[0].index;
-                    const category = donutData.labels[index];
-                    window.location.href = `/drilldown/${category}`;
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Date'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Amount'
+                    },
+                    beginAtZero: true
                 }
             }
         }
     });
 </script>
+
+<script>
+    const topDescriptionData = {
+        labels: {{ top_description_labels | tojson }},
+        datasets: [{
+            label: 'Total Amount',
+            data: {{ top_description_values | tojson }},
+            backgroundColor: '#17a2b8'
+        }]
+    };
+
+    new Chart(document.getElementById('topDescriptionChart'), {
+        type: 'bar',
+        data: topDescriptionData,
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return '£' + context.parsed.x;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Amount (£)'
+                    },
+                    beginAtZero: true
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Description'
+                    }
+                }
+            }
+        }
+    });
+</script>
+
 
 {% endblock %}
